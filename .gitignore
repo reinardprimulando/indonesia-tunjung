@@ -1,0 +1,16 @@
+# Streamlit secrets (Crucial: Keeps your API key safe)
+.streamlit/secrets.toml
+
+# Python cache files (Keeps your GitHub repository clean)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments (If you decide to use them later)
+venv/
+.venv/
+env/
+
+# Mac system files (If you are on a Mac)
+.DS_Store
