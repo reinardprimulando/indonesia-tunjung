@@ -168,7 +168,7 @@ if st.button("Terjemahkan"):
         st.warning("Harap masukkan teks yang ingin diterjemahkan terlebih dahulu.")
 
 # --- 6. Disclaimer Tengah ---
-st.info("⚠️ **Pemberitahuan Penting:**\nJika sistem gagal menerjemahkan karena batas penggunaan API harian telah habis, mohon tunggu dan coba kembali keesokan harinya.")
+st.info("⚠️ **Pemberitahuan Penting:**\nJika sistem gagal menerjemahkan karena batas penggunaan API harian telah habis, mohon tunggu dan coba kembali besok.\n Terjemahan dari Tonyooi ke Indonesia lebih sering tidak akurat.")
 
 st.divider()
 
