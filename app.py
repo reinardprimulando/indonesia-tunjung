@@ -4,6 +4,7 @@ import re
 import random
 import time
 import streamlit as st
+import streamlit.components.v1 as components
 from google import genai
 
 # --- 1. Konfigurasi Halaman ---
@@ -175,7 +176,12 @@ st.divider()
 # --- 7. Bantuan & Kontribusi ---
 st.markdown("### 🤝 Bantu Kami Berkembang")
 st.write("Menemukan terjemahan yang kurang tepat? Atau ingin menambahkan kosakata baru ke dalam sistem ini? Silakan isi formulir di bawah.")
-st.link_button("📝 Formulir Koreksi & Penambahan Kata", "https://forms.gle/2HvjndHawpUGuPzu7")
+
+# GANTI URL DI BAWAH INI dengan tautan 'src' panjang yang Anda dapatkan dari Langkah 1
+embed_url = "https://docs.google.com/forms/d/e/1FAIpQLSc-MkB8kqZbV5vcFwn0002IBmNBdawPsIGjwysAKr4G2PZ7_g/viewform?embedded=true"
+
+# Menampilkan Google Form langsung di dalam halaman
+components.iframe(embed_url, height=800, scrolling=True)
 
 st.divider()
 
