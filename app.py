@@ -1,31 +1,101 @@
 import os
 import csv
+import re
+import random
+import time
 import streamlit as st
 from google import genai
 
-# --- 1. Page Configuration ---
-st.set_page_config(page_title="Dayak Tonyooi Translator", page_icon="🌍")
-st.title("🌍 Dayak Tonyooi Translator")
-st.write("Translate text between Indonesian and Dayak Tonyooi instantly.")
+# --- 1. Konfigurasi Halaman ---
+st.set_page_config(page_title="Penerjemah Dayak Tonyooi", page_icon="🌍")
+st.title("🌍 Penerjemah Bahasa Dayak Tonyooi")
+st.write("Terjemahkan teks antara Bahasa Indonesia dan Bahasa Dayak Tonyooi secara instan menggunakan AI.")
 
-# --- 2. Initialize the Client ---
-# Streamlit Cloud will securely pass the API key from its Secrets manager
+# --- 2. Inisialisasi Klien API ---
 try:
     client = genai.Client()
 except Exception as e:
-    st.error("API Key not found. Please configure your secrets.")
+    st.error("Kunci API tidak ditemukan. Harap konfigurasikan secrets Streamlit Anda.")
     st.stop()
 
-# --- 3. Functions ---
-def translate_text(input_text, source_lang, target_lang, translation_memory):
-    """Translates text using a dynamic few-shot prompt."""
+# --- 3. Fungsi Inti ---
+@st.cache_data 
+def load_csv_corpus(file_path):
+    """Membaca dataset CSV dan mengubahnya menjadi list of dictionary."""
+    dataset = []
+    try:
+        with open(file_path, mode='r', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if len(row) >= 2:
+                    dataset.append({
+                        "Indonesian": row[0].strip(),
+                        "Dayak_Tonyooi": row[1].strip()
+                    })
+    except FileNotFoundError:
+        st.error(f"Galat: Tidak dapat menemukan file dataset {file_path}")
+    return dataset
+
+def find_relevant_examples(input_text, source_lang, dataset):
+    """Mencari padanan kata yang paling relevan untuk konteks terjemahan."""
+    input_words = set(re.findall(r'\w+', input_text.lower()))
+    source_key = source_lang.replace(" ", "_")
+    best_matches = []
+    
+    # Pencarian Kata-per-Kata
+    for word in input_words:
+        matching_rows = []
+        for row in dataset:
+            row_words = set(re.findall(r'\w+', row.get(source_key, "").lower()))
+            if word in row_words:
+                matching_rows.append(row)
+        
+        matching_rows.sort(key=lambda x: len(x.get(source_key, "")))
+        
+        for match in matching_rows[:2]:
+            if match not in best_matches:
+                best_matches.append(match)
+                
+    # Penambahan kalimat konteks
+    scored_examples = []
+    for row in dataset:
+        if row in best_matches: 
+            continue
+        source_text = row.get(source_key, "")
+        row_words = set(re.findall(r'\w+', source_text.lower()))
+        match_score = len(input_words.intersection(row_words))
+        
+        if match_score > 0:
+            density_score = match_score / len(row_words)
+            scored_examples.append((density_score, row))
+            
+    scored_examples.sort(key=lambda x: x[0], reverse=True)
+    
+    for score, row in scored_examples[:5]:
+        best_matches.append(row)
+        
+    return best_matches
+
+def translate_text(input_text, source_lang, target_lang, dataset):
+    """Menerjemahkan teks dengan Auto-Retry untuk Limit API."""
+    relevant_examples = find_relevant_examples(input_text, source_lang, dataset)
+    
+    total_target = 20
+    num_random_needed = max(0, total_target - len(relevant_examples))
+    
+    remaining_dataset = [row for row in dataset if row not in relevant_examples]
+    random_examples = random.sample(remaining_dataset, min(num_random_needed, len(remaining_dataset)))
+    
+    final_examples_list = random_examples + relevant_examples
+    
     examples_text = ""
-    for pair in translation_memory:
+    for pair in final_examples_list:
         if source_lang == "Indonesian":
             examples_text += f"* Indonesian: {pair['Indonesian']}\n  Dayak Tonyooi: {pair['Dayak_Tonyooi']}\n\n"
         else:
             examples_text += f"* Dayak Tonyooi: {pair['Dayak_Tonyooi']}\n  Indonesian: {pair['Indonesian']}\n\n"
-        
+            
+    # AI Prompt (Tetap dalam bahasa Inggris agar AI memahami instruksi dengan maksimal)
     prompt = f"""You are an expert linguist and translator specializing in the Dayak Tonyooi language. 
 Your task is to translate the given {source_lang} text into {target_lang}. 
 
@@ -38,61 +108,94 @@ Now, translate this exact phrase. Output ONLY the {target_lang} translation, not
 {source_lang}: "{input_text}"
 {target_lang}:"""
 
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        return response.text.strip()
-    except Exception as e:
-         return f"Error connecting to Gemini API: {e}"
+    # --- RETRY LOGIC ---
+    max_retries = 3
+    base_wait_time = 4  
 
-# We use @st.cache_data so the CSV only loads once, speeding up the app
-@st.cache_data 
-def load_csv_corpus(file_path):
-    """Reads the CSV dataset and converts it into a list of dictionaries."""
-    dataset = []
-    try:
-        with open(file_path, mode='r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if len(row) >= 2:
-                    dataset.append({
-                        "Indonesian": row[0].strip(),
-                        "Dayak_Tonyooi": row[1].strip()
-                    })
-    except FileNotFoundError:
-        st.error(f"Error: Could not find the dataset file {file_path}")
-    return dataset
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemma-3-27b-it',
+                contents=prompt,
+            )
+            return response.text.strip()
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = base_wait_time * (2 ** attempt) 
+                    st.toast(f"Batas Akses API. Menjeda selama {wait_time} detik...", icon="⏳")
+                    time.sleep(wait_time)
+                    continue 
+                else:
+                    return f"Maaf, server AI sedang sibuk. Silakan coba lagi dalam beberapa menit."
+            else:
+                return f"Terjadi kesalahan saat menghubungi API: {e}"
 
-# --- 4. Load Data ---
+# --- 4. Memuat Data ---
 csv_file_path = "dayak_dataset.csv"
 real_dataset = load_csv_corpus(csv_file_path)
-examples_to_use = real_dataset[:100] if real_dataset else []
 
 st.divider()
 
-# --- 5. User Interface ---
-# Replace the old menu with a nice radio button
+# --- 5. Antarmuka Pengguna (User Interface) ---
 direction = st.radio(
-    "Select Translation Direction:",
-    ("Indonesian to Dayak Tonyooi", "Dayak Tonyooi to Indonesian")
+    "Pilih Arah Terjemahan:",
+    ("Indonesia ke Dayak Tonyooi", "Dayak Tonyooi ke Indonesia")
 )
 
-if direction == "Indonesian to Dayak Tonyooi":
+# Menyesuaikan label UI dengan format yang dibutuhkan sistem AI internal
+if direction == "Indonesia ke Dayak Tonyooi":
     source_lang, target_lang = "Indonesian", "Dayak Tonyooi"
+    ui_source_lang, ui_target_lang = "Indonesia", "Dayak Tonyooi"
 else:
     source_lang, target_lang = "Dayak Tonyooi", "Indonesian"
+    ui_source_lang, ui_target_lang = "Dayak Tonyooi", "Indonesia"
 
-# Replace the 'input()' with a text input box
-user_input = st.text_input(f"Enter {source_lang} text to translate:")
+user_input = st.text_input(f"Masukkan teks Bahasa {ui_source_lang} untuk diterjemahkan:")
 
-# Create a translate button
-if st.button("Translate"):
+if st.button("Terjemahkan"):
     if user_input.strip():
-        # Show a loading spinner while waiting for the API
-        with st.spinner("Translating..."):
-            translation_result = translate_text(user_input, source_lang, target_lang, examples_to_use)
-            st.success(f"**{target_lang}:** {translation_result}")
+        if not real_dataset:
+            st.error("Dataset kosong atau gagal dimuat. Terjemahan tidak dapat dilanjutkan.")
+        else:
+            with st.spinner("Mencari padanan kata, menyiapkan konteks kalimat, dan menerjemahkan..."):
+                translation_result = translate_text(user_input, source_lang, target_lang, real_dataset)
+                st.success(f"**{ui_target_lang}:** {translation_result}")
     else:
-        st.warning("Please enter some text to translate first.")
+        st.warning("Harap masukkan teks yang ingin diterjemahkan terlebih dahulu.")
+
+# --- 6. Disclaimer Tengah ---
+st.info("⚠️ **Pemberitahuan Penting:**\nJika sistem gagal menerjemahkan karena batas penggunaan API harian telah habis, mohon tunggu dan coba kembali keesokan harinya.")
+
+st.divider()
+
+# --- 7. Bantuan & Kontribusi ---
+st.markdown("### 🤝 Bantu Kami Berkembang")
+st.write("Menemukan terjemahan yang kurang tepat? Atau ingin menambahkan kosakata baru ke dalam sistem ini? Silakan isi formulir di bawah.")
+st.link_button("📝 Formulir Koreksi & Penambahan Kata", "https://forms.gle/2HvjndHawpUGuPzu7")
+
+st.divider()
+
+# --- 8. Informasi Hosting & Logo ---
+st.markdown("<h4 style='text-align: center; color: gray;'>Hosted by:</h4>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-weight: bold;'>Laboratorium Fisika Lanjut Fisika UNPAR</p>", unsafe_allow_html=True)
+
+# Menyelaraskan logo ke tengah menggunakan kolom
+col1, col2, col3, col4 = st.columns([1, 1.2, 1.2, 1])
+with col2:
+    st.image("FA-Logo-Berwarna-Unpar.png", width=180)
+with col3:
+    st.image("logoBluIG.png", width=180)
+
+st.divider()
+
+# --- 9. Daftar Kontributor ---
+st.markdown("<p style='text-align: center; font-size: 14px;'>Terima kasih kepada semua pihak yang telah membantu menyempurnakan kamus ini.</p>", unsafe_allow_html=True)
+
+# Membuat tautan di tengah
+col_link1, col_link2, col_link3 = st.columns([1, 2, 1])
+with col_link2:
+    st.link_button("👥 Lihat Daftar Kontributor", "https://docs.google.com/spreadsheets/d/12LlioWh3o9uLzAmW80fS-wVvbEXmVoTUuhdIk-Thl7g/edit?usp=sharing", use_container_width=True)
