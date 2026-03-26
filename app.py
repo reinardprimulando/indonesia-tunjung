@@ -165,6 +165,14 @@ if st.button("Terjemahkan"):
             with st.spinner("Mencari padanan kata, menyiapkan konteks kalimat, dan menerjemahkan..."):
                 translation_result = translate_text(user_input, source_lang, target_lang, real_dataset)
                 st.success(f"**{ui_target_lang}:** {translation_result}")
+                # --- PENCATATAN REQUEST DIMULAI DI SINI ---
+                try:
+                    with open("translation_requests.txt", "a", encoding="utf-8") as log_file:
+                        # Menyimpan kalimat input dan kalimat output secara rapi
+                        log_file.write(f"[{ui_source_lang} -> {ui_target_lang}] Input: {user_input} | Output: {translation_result}\n")
+                except Exception as e:
+                    st.warning(f"Terjemahan berhasil, tetapi gagal menyimpan log: {e}")
+                # --- PENCATATAN REQUEST SELESAI ---
     else:
         st.warning("Harap masukkan teks yang ingin diterjemahkan terlebih dahulu.")
 
