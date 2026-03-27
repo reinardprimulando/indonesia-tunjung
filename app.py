@@ -6,6 +6,7 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 from google import genai
+from google.genai import types # <--- ADD THIS LINE HERE
 
 # --- 1. Konfigurasi Halaman ---
 st.set_page_config(page_title="Penerjemah Dayak Tonyooi", page_icon="🌍")
@@ -118,6 +119,7 @@ Now, translate this exact phrase. Output ONLY the {target_lang} translation, not
             response = client.models.generate_content(
                 model='gemma-3-27b-it',
                 contents=prompt,
+                config=types.GenerateContentConfig(temperature=0.1)
             )
             return response.text.strip()
             
